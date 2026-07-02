@@ -819,3 +819,118 @@ class TestResolveContentTypes:
             ["application/json", "application/xml"],
         )
         assert result == ["application/json", "application/xml"]
+
+
+# ---------------------------------------------------------------------------
+# Springfox / real-world edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestWildcardContentType:
+    """Springfox generates */* for produces; should be normalized to application/json."""
+
+    def test_wildcard_normalized_to_json(self):
+        from mcp_restful_adapter.spec_converter import _resolve_content_types
+
+        result = _resolve_content_types(["*/*"])
+        assert result == ["application/json"]
+
+    def test_application_wildcard_normalized(self):
+        from mcp_restful_adapter.spec_converter import _resolve_content_types
+
+        result = _resolve_content_types(["application/*"])
+        assert result == ["application/json"]
+
+    def test_wildcard_in_full_response_conversion(self, minimal_swagger_2):
+        minimal_swagger_2["paths"] = {
+            "/test": {
+                "get": {
+                    "produces": ["*/*"],
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "schema": {"type": "string"},
+                        }
+                    },
+                }
+            }
+        }
+        result = convert_swagger_to_openapi(minimal_swagger_2)
+        content = result["paths"]["/test"]["get"]["responses"]["200"]["content"]
+        assert "application/json" in content
+        assert "*/*" not in content
+
+
+class TestOriginalRefStripping:
+    """Springfox adds originalRef to $ref objects; must be stripped in OpenAPI 3.0."""
+
+    def test_original_ref_stripped_from_schema(self):
+        from mcp_restful_adapter.spec_converter import _convert_schema_object
+
+        schema = {"$ref": "#/definitions/Foo", "originalRef": "Foo"}
+        result = _convert_schema_object(schema)
+        assert "originalRef" not in result
+        assert result == {"$ref": "#/components/schemas/Foo"}
+
+    def test_original_ref_stripped_in_definitions(self, minimal_swagger_2):
+        minimal_swagger_2["paths"] = {}
+        minimal_swagger_2["definitions"] = {
+            "Foo": {
+                "type": "object",
+                "properties": {
+                    "bar": {"$ref": "#/definitions/Bar", "originalRef": "Bar"},
+                },
+            },
+            "Bar": {"type": "string"},
+        }
+        result = convert_swagger_to_openapi(minimal_swagger_2)
+        foo_schema = result["components"]["schemas"]["Foo"]
+        bar_ref = foo_schema["properties"]["bar"]
+        assert "originalRef" not in bar_ref
+
+
+class TestEmptyContactCleanup:
+    """Empty contact object in info should be removed."""
+
+    def test_empty_contact_removed(self, minimal_swagger_2):
+        minimal_swagger_2["info"] = {
+            "title": "Test",
+            "version": "1.0",
+            "contact": {},
+        }
+        result = convert_swagger_to_openapi(minimal_swagger_2)
+        assert "contact" not in result["info"]
+
+    def test_non_empty_contact_preserved(self, minimal_swagger_2):
+        minimal_swagger_2["info"] = {
+            "title": "Test",
+            "version": "1.0",
+            "contact": {"name": "API Support", "email": "support@example.com"},
+        }
+        result = convert_swagger_to_openapi(minimal_swagger_2)
+        assert result["info"]["contact"]["name"] == "API Support"
+
+
+class TestFileTypeInNestedSchemas:
+    """type: file in nested schemas (e.g., items) must be converted."""
+
+    def test_file_type_in_array_items(self):
+        from mcp_restful_adapter.spec_converter import _convert_schema_object
+
+        schema = {"type": "array", "items": {"type": "file"}}
+        result = _convert_schema_object(schema)
+        assert result["items"]["type"] == "string"
+        assert result["items"]["format"] == "binary"
+
+    def test_file_type_in_properties(self):
+        from mcp_restful_adapter.spec_converter import _convert_schema_object
+
+        schema = {
+            "type": "object",
+            "properties": {
+                "upload": {"type": "file"},
+            },
+        }
+        result = _convert_schema_object(schema)
+        assert result["properties"]["upload"]["type"] == "string"
+        assert result["properties"]["upload"]["format"] == "binary"

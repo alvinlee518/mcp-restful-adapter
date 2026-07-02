@@ -1,6 +1,6 @@
 [project]
 name = "mcp-restful-adapter"
-version = "0.2.0"
+version = "0.3.0"
 description = "Automatically convert RESTful APIs (Swagger 2.0 / OpenAPI 3.0) into MCP Servers"
 readme = "README.md"
 requires-python = ">=3.10"

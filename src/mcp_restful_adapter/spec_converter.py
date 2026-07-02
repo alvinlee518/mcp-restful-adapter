@@ -33,6 +33,8 @@ def convert_swagger_to_openapi(spec: dict[str, Any]) -> dict[str, Any]:
     # Clean up empty nested objects that fail validation
     if isinstance(info.get("license"), dict) and "name" not in info["license"]:
         info["license"] = {"name": "Unknown"}
+    if isinstance(info.get("contact"), dict) and not info["contact"]:
+        del info["contact"]
     result["info"] = info
 
     # 2. Servers: host + basePath + schemes → servers[].url
@@ -252,6 +254,23 @@ def _resolve_ref_param(param: dict[str, Any]) -> dict[str, Any]:
     return param
 
 
+def _schema_has_file(schema: dict[str, Any]) -> bool:
+    """Check if a schema (already converted) contains any file/binary types."""
+    if schema.get("format") == "binary":
+        return True
+    for key in ("items", "properties", "additionalProperties"):
+        val = schema.get(key)
+        if isinstance(val, dict) and _schema_has_file(val):
+            return True
+    for key in ("allOf", "anyOf", "oneOf"):
+        val = schema.get(key)
+        if isinstance(val, list):
+            for item in val:
+                if isinstance(item, dict) and _schema_has_file(item):
+                    return True
+    return False
+
+
 def _build_request_body(
     body_params: list[dict[str, Any]],
     form_params: list[dict[str, Any]],
@@ -266,6 +285,9 @@ def _build_request_body(
 
         # Build content map from consumes
         content_types = _resolve_content_types(consumes, is_body=True)
+        # If schema contains file types, force multipart/form-data
+        if _schema_has_file(schema):
+            content_types = ["multipart/form-data"]
         content: dict[str, Any] = {}
         for ct in content_types:
             content[ct] = {"schema": schema}
@@ -405,6 +427,9 @@ def _convert_schema_object(schema: dict[str, Any]) -> dict[str, Any]:
     result: dict[str, Any] = {}
 
     for key, value in schema.items():
+        # Strip Springfox extension fields not valid in OpenAPI 3.0
+        if key == "originalRef":
+            continue
         if key == "$ref" and isinstance(value, str):
             if value.startswith("#/"):
                 result["$ref"] = _rewrite_ref(value)
@@ -424,6 +449,11 @@ def _convert_schema_object(schema: dict[str, Any]) -> dict[str, Any]:
             result[key] = [_convert_schema_object(item) for item in value]
         else:
             result[key] = value
+
+    # Swagger 2.0 type: "file" → OpenAPI 3.0 type: "string", format: "binary"
+    if result.get("type") == "file":
+        result["type"] = "string"
+        result["format"] = "binary"
 
     return result
 
@@ -544,6 +574,9 @@ def _resolve_content_types(
             "application/x-www-form-urlencoded",
         ):
             continue
+        # Normalize wildcard media types (common Springfox output)
+        if ct in ("*/*", "application/*"):
+            ct = "application/json"
         result.append(ct)
 
     return result or ["application/json"]

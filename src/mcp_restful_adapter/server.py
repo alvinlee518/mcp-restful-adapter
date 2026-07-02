@@ -1,0 +1,161 @@
+"""Build and run the MCP server from an OpenAPI specification."""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+import httpx
+from fastmcp import FastMCP
+from fastmcp.server.providers.openapi.routing import MCPType, RouteMap
+
+from mcp_restful_adapter._version import __version__ as _version
+from mcp_restful_adapter.logging import LOGGER_NAME
+
+logger = logging.getLogger(LOGGER_NAME)
+
+
+async def log_request(request: httpx.Request):
+    """Log outgoing HTTP request details."""
+    body = (
+        request.content.decode("utf-8", errors="replace")
+        if request.content
+        else "(no body)"
+    )
+    logger.info(
+        "[REQUEST] %s %s\n  Headers: %s\n  Body: %s",
+        request.method,
+        request.url,
+        dict(request.headers),
+        body,
+    )
+
+
+async def log_response(response: httpx.Response):
+    """Log incoming HTTP response details."""
+    # Read body if not already consumed
+    try:
+        await response.aread()
+    except Exception:
+        pass
+    body = (
+        response.content.decode("utf-8", errors="replace")
+        if response.content
+        else "(no body)"
+    )
+    logger.info(
+        "[RESPONSE] %s %s\n  Status: %d\n  Body: %s",
+        response.request.method if response.request else "?",
+        response.url,
+        response.status_code,
+        body,
+    )
+
+
+def build_server(
+    spec: dict[str, Any],
+    base_url: str | None = None,
+    name: str = "RESTful API Server",
+    tags: set[str] | None = None,
+    methods: set[str] | None = None,
+    paths: str | None = None,
+    extra_headers: dict[str, str] | None = None,
+) -> FastMCP:
+    """Build a FastMCP server from an OpenAPI specification.
+
+    Args:
+        spec: The OpenAPI 3.x specification dict.
+        base_url: Base URL for the API.
+        name: Name for the MCP server.
+        tags: Set of tag names to include (OR logic — match ANY).
+        methods: Set of HTTP methods to include (case-insensitive).
+        paths: Regex pattern to match against path strings.
+        extra_headers: Custom headers to include in every request
+            (e.g. ``{"Authorization": "Bearer xxx", "X-Tenant": "acme"}``).
+
+    Returns:
+        A configured FastMCP server instance.
+    """
+    headers: dict[str, str] = {
+        "X-Requested-From": f"MCP/{_version}",
+    }
+    if extra_headers:
+        headers.update(extra_headers)
+
+    # Build httpx client
+    client_kwargs: dict[str, Any] = {
+        "headers": headers,
+        "timeout": 30.0,
+        "follow_redirects": True,
+        "event_hooks": {
+            "request": [log_request],
+            "response": [log_response],
+        },
+    }
+    if base_url:
+        client_kwargs["base_url"] = base_url
+
+    client = httpx.AsyncClient(**client_kwargs)
+
+    # Build RouteMaps for filtering
+    route_maps = _build_route_maps(tags, methods, paths)
+
+    # Create MCP server from OpenAPI spec
+    mcp = FastMCP.from_openapi(
+        openapi_spec=spec,
+        client=client,
+        name=name,
+        route_maps=route_maps,
+        validate_output=False,
+    )
+
+    return mcp
+
+
+def _build_route_maps(
+    tags: set[str] | None,
+    methods: set[str] | None,
+    paths: str | None,
+) -> list[RouteMap]:
+    """Build RouteMap list for filtering endpoints.
+
+    Strategy:
+    - If tags specified: one RouteMap per tag (OR logic), matched first.
+    - If no tags: one RouteMap matching all (filtered by methods/paths).
+    - Final catch-all EXCLUDE rule drops everything unmatched.
+    """
+    route_maps: list[RouteMap] = []
+
+    # Normalize methods to uppercase list, or "*" for all
+    allowed_methods: list[str] | str = "*"
+    if methods:
+        allowed_methods = [m.upper() for m in methods]
+
+    # Path pattern
+    pattern = paths or r".*"
+
+    if tags:
+        # OR logic: one RouteMap per tag — first match wins
+        for tag in tags:
+            route_maps.append(
+                RouteMap(
+                    methods=allowed_methods,
+                    pattern=pattern,
+                    tags={tag},
+                    mcp_type=MCPType.TOOL,
+                )
+            )
+    else:
+        # No tag filter: accept all routes matching methods/paths
+        route_maps.append(
+            RouteMap(
+                methods=allowed_methods,
+                pattern=pattern,
+                mcp_type=MCPType.TOOL,
+            )
+        )
+
+    # Catch-all: exclude everything not matched above
+    route_maps.append(RouteMap(mcp_type=MCPType.EXCLUDE))
+
+    return route_maps

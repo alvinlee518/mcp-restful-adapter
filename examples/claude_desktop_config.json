@@ -1,0 +1,31 @@
+{
+  "mcpServers": {
+    "petstore": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--project", "/path/to/mcp-restful-adapter",
+        "mcp-restful-adapter"
+      ],
+      "env": {
+        "API_SPEC_URL": "https://petstore3.swagger.io/api/v3/openapi.json",
+        "API_BASE_URL": "https://petstore3.swagger.io/api/v3",
+        "API_TAGS": "pet,store"
+      }
+    },
+    "my-api-with-auth": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--project", "/path/to/mcp-restful-adapter",
+        "mcp-restful-adapter"
+      ],
+      "env": {
+        "API_SPEC_URL": "https://your-api.example.com/openapi.json",
+        "API_BASE_URL": "https://your-api.example.com",
+        "API_TOKEN": "your-bearer-token",
+        "API_PATHS": "^/api/v[12]/"
+      }
+    }
+  }
+}

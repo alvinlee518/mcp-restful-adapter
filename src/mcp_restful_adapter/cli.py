@@ -100,5 +100,19 @@ def main() -> None:
         logger.error("Failed to build MCP server: %s", e)
         sys.exit(1)
 
-    logger.info("Starting MCP server: %s", server_name)
-    mcp.run(transport="stdio", show_banner=False)
+    # Transport configuration
+    transport = os.environ.get("MCP_TRANSPORT", "stdio")
+    host = os.environ.get("MCP_HOST", "0.0.0.0")
+    port = int(os.environ.get("MCP_PORT", "8000"))
+
+    logger.info("Starting MCP server: %s (transport=%s)", server_name, transport)
+
+    if transport == "stdio":
+        mcp.run(transport="stdio", show_banner=False)
+    else:
+        mcp.run(
+            transport=transport,
+            host=host,
+            port=port,
+            show_banner=False,
+        )

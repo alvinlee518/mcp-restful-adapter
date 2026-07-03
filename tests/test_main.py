@@ -149,3 +149,93 @@ class TestMainNormalFlow:
                 main()
 
                 assert mock_build.call_args.kwargs["paths"] == r"^/api/v1/"
+
+    def test_main_with_exclude_paths(self):
+        """main() should pass API_PATHS_EXCLUDE to build_server."""
+        spec = {
+            "openapi": "3.0.3",
+            "info": {"title": "Test", "version": "1.0"},
+            "paths": {},
+        }
+        mock_mcp = MagicMock()
+        env = {
+            "API_SPEC_URL": "https://example.com/spec.json",
+            "API_BASE_URL": "https://api.example.com",
+            "API_PATHS_EXCLUDE": r"(?i)(delete|remove)",
+        }
+
+        with patch.dict(os.environ, env, clear=True):
+            with (
+                patch("mcp_restful_adapter.spec_fetcher.fetch_spec", new_callable=AsyncMock, return_value=spec),
+                patch("mcp_restful_adapter.server.build_server", return_value=mock_mcp) as mock_build,
+            ):
+                from mcp_restful_adapter.cli import main
+                main()
+
+                assert mock_build.call_args.kwargs["exclude_paths"] == r"(?i)(delete|remove)"
+
+
+class TestMainErrorPaths:
+    def test_headers_not_json_object(self):
+        """main() should exit if API_HEADERS is not a JSON object."""
+        env = {
+            "API_SPEC_URL": "https://example.com/spec.json",
+            "API_BASE_URL": "https://api.example.com",
+            "API_HEADERS": '"just a string"',
+        }
+        with patch.dict(os.environ, env, clear=True):
+            with pytest.raises(SystemExit) as exc_info:
+                from mcp_restful_adapter.cli import main
+                main()
+            assert exc_info.value.code == 1
+
+    def test_headers_invalid_json(self):
+        """main() should exit if API_HEADERS is not valid JSON."""
+        env = {
+            "API_SPEC_URL": "https://example.com/spec.json",
+            "API_BASE_URL": "https://api.example.com",
+            "API_HEADERS": "{invalid json}",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            with pytest.raises(SystemExit) as exc_info:
+                from mcp_restful_adapter.cli import main
+                main()
+            assert exc_info.value.code == 1
+
+    def test_fetch_spec_failure(self):
+        """main() should exit if fetching the spec fails."""
+        env = {
+            "API_SPEC_URL": "https://example.com/spec.json",
+            "API_BASE_URL": "https://api.example.com",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            with patch(
+                "mcp_restful_adapter.spec_fetcher.fetch_spec",
+                new_callable=AsyncMock,
+                side_effect=Exception("Connection refused"),
+            ):
+                with pytest.raises(SystemExit) as exc_info:
+                    from mcp_restful_adapter.cli import main
+                    main()
+                assert exc_info.value.code == 1
+
+    def test_build_server_failure(self):
+        """main() should exit if building the server fails."""
+        spec = {
+            "openapi": "3.0.3",
+            "info": {"title": "Test", "version": "1.0"},
+            "paths": {},
+        }
+        env = {
+            "API_SPEC_URL": "https://example.com/spec.json",
+            "API_BASE_URL": "https://api.example.com",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            with (
+                patch("mcp_restful_adapter.spec_fetcher.fetch_spec", new_callable=AsyncMock, return_value=spec),
+                patch("mcp_restful_adapter.server.build_server", side_effect=Exception("Invalid spec")),
+            ):
+                with pytest.raises(SystemExit) as exc_info:
+                    from mcp_restful_adapter.cli import main
+                    main()
+                assert exc_info.value.code == 1

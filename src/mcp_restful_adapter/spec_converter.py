@@ -85,6 +85,7 @@ def _convert_paths(spec: dict[str, Any]) -> dict[str, Any]:
     paths: dict[str, Any] = {}
     global_consumes = spec.get("consumes", ["application/json"])
     global_produces = spec.get("produces", ["application/json"])
+    base_path = spec.get("basePath", "")
 
     for path_key, path_item in spec.get("paths", {}).items():
         new_path_item: dict[str, Any] = {}
@@ -101,13 +102,18 @@ def _convert_paths(spec: dict[str, Any]) -> dict[str, Any]:
 
         # Convert each HTTP method operation
         http_methods = {"get", "post", "put", "delete", "patch", "head", "options"}
+        active_methods = [m for m in http_methods if m in path_item]
+        multi_method = len(active_methods) > 1
+
         for method in http_methods:
             if method not in path_item:
                 continue
 
             operation = path_item[method]
             new_op = _convert_operation(
-                operation, global_consumes, global_produces
+                operation, global_consumes, global_produces,
+                base_path=base_path, path_key=path_key,
+                method=method if multi_method else "",
             )
             new_path_item[method] = new_op
 
@@ -116,19 +122,50 @@ def _convert_paths(spec: dict[str, Any]) -> dict[str, Any]:
     return paths
 
 
+def _generate_operation_id(base_path: str, path: str, method: str = "") -> str:
+    """Generate a lowercase operationId from basePath + path + method.
+
+    Example: basePath="/aftersales", path="/orderAssignLog/detail"
+          → "aftersales_orderassignlog_detail"
+    """
+    segments = []
+
+    bp = base_path.strip("/")
+    if bp:
+        segments.append(bp)
+
+    parts = path.strip("/").split("/")
+    for part in parts:
+        if part.startswith("{") and part.endswith("}"):
+            segments.append("by_" + part[1:-1])
+        else:
+            segments.append(part)
+
+    if method:
+        segments.append(method)
+
+    return "_".join(s.lower() for s in segments)
+
+
 def _convert_operation(
     operation: dict[str, Any],
     global_consumes: list[str],
     global_produces: list[str],
+    base_path: str = "",
+    path_key: str = "",
+    method: str = "",
 ) -> dict[str, Any]:
     """Convert a single Swagger 2.0 operation to OpenAPI 3.0."""
     new_op: dict[str, Any] = {}
 
     # Pass-through fields
-    for field in ("tags", "summary", "description", "operationId", "deprecated",
+    for field in ("tags", "summary", "description", "deprecated",
                   "security"):
         if field in operation:
             new_op[field] = operation[field]
+
+    # Generate path-based operationId (replaces Springfox xxxUsingGET names)
+    new_op["operationId"] = _generate_operation_id(base_path, path_key, method)
 
     # External docs
     if "externalDocs" in operation:

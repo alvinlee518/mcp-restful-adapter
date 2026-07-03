@@ -388,3 +388,31 @@ class TestWhitelistBlacklist:
         assert maps[0].pattern == r"/exclude"
         assert maps[1].mcp_type == MCPType.TOOL
         assert maps[2].mcp_type == MCPType.EXCLUDE
+
+    def test_build_route_maps_tags_with_whitelist(self):
+        """Tags + whitelist: one TOOL per tag with path pattern."""
+        from fastmcp.server.providers.openapi.routing import MCPType
+
+        maps = _build_route_maps({"user", "product"}, None, r"/api", r"/admin")
+        # Expected: [whitelist TOOL(user), whitelist TOOL(product), blacklist EXCLUDE, catch-all EXCLUDE]
+        assert len(maps) == 4
+        assert maps[0].mcp_type == MCPType.TOOL
+        assert maps[0].pattern == r"/api"
+        assert maps[1].mcp_type == MCPType.TOOL
+        assert maps[1].pattern == r"/api"
+        tags = {frozenset(m.tags) for m in maps[:2]}
+        assert frozenset({"user"}) in tags
+        assert frozenset({"product"}) in tags
+        assert maps[2].mcp_type == MCPType.EXCLUDE
+        assert maps[3].mcp_type == MCPType.EXCLUDE
+
+    def test_whitelist_with_tags_filtering(self, sample_openapi_spec):
+        """Tags + whitelist combination filters correctly."""
+        server = build_server(
+            sample_openapi_spec,
+            tags={"user"},
+            paths=r"/users",
+        )
+        tools = self._get_tool_names(server)
+        # tag=user AND path=/users → listUsers, createUser
+        assert tools == {"listUsers", "createUser"}

@@ -934,3 +934,155 @@ class TestFileTypeInNestedSchemas:
         result = _convert_schema_object(schema)
         assert result["properties"]["upload"]["type"] == "string"
         assert result["properties"]["upload"]["format"] == "binary"
+
+
+class TestOperationIdGeneration:
+    """Path-based lowercase operationId replaces original names."""
+
+    def test_generate_basic(self):
+        from mcp_restful_adapter.spec_converter import _generate_operation_id
+
+        result = _generate_operation_id("/aftersales", "/orderAssignLog/detail")
+        assert result == "aftersales_orderassignlog_detail"
+
+    def test_generate_with_path_param(self):
+        from mcp_restful_adapter.spec_converter import _generate_operation_id
+
+        result = _generate_operation_id("/crm", "/users/{id}")
+        assert result == "crm_users_by_id"
+
+    def test_generate_with_method_suffix(self):
+        from mcp_restful_adapter.spec_converter import _generate_operation_id
+
+        result = _generate_operation_id("/api", "/data/export", method="get")
+        assert result == "api_data_export_get"
+
+    def test_generate_no_base_path(self):
+        from mcp_restful_adapter.spec_converter import _generate_operation_id
+
+        result = _generate_operation_id("", "/users/list")
+        assert result == "users_list"
+
+    def test_always_replaces_original(self, minimal_swagger_2):
+        minimal_swagger_2["basePath"] = "/api"
+        minimal_swagger_2["paths"] = {
+            "/users/list": {
+                "get": {
+                    "operationId": "myCustomName",
+                    "responses": {"200": {"description": "OK"}},
+                }
+            }
+        }
+        result = convert_swagger_to_openapi(minimal_swagger_2)
+        op_id = result["paths"]["/users/list"]["get"]["operationId"]
+        assert op_id == "api_users_list"
+
+    def test_multi_method_gets_suffix(self, minimal_swagger_2):
+        minimal_swagger_2["basePath"] = "/api"
+        minimal_swagger_2["paths"] = {
+            "/data/export": {
+                "get": {
+                    "operationId": "exportUsingGET",
+                    "responses": {"200": {"description": "OK"}},
+                },
+                "post": {
+                    "operationId": "exportUsingPOST",
+                    "responses": {"200": {"description": "OK"}},
+                },
+            }
+        }
+        result = convert_swagger_to_openapi(minimal_swagger_2)
+        get_id = result["paths"]["/data/export"]["get"]["operationId"]
+        post_id = result["paths"]["/data/export"]["post"]["operationId"]
+        assert get_id == "api_data_export_get"
+        assert post_id == "api_data_export_post"
+
+
+class TestSchemaHasFile:
+    """Test _schema_has_file recursive detection."""
+
+    def test_allof_with_file(self):
+        from mcp_restful_adapter.spec_converter import _schema_has_file
+
+        schema = {"allOf": [{"type": "string", "format": "binary"}]}
+        assert _schema_has_file(schema) is True
+
+    def test_anyof_with_file(self):
+        from mcp_restful_adapter.spec_converter import _schema_has_file
+
+        schema = {"anyOf": [{"type": "object"}, {"type": "string", "format": "binary"}]}
+        assert _schema_has_file(schema) is True
+
+    def test_oneof_with_file(self):
+        from mcp_restful_adapter.spec_converter import _schema_has_file
+
+        schema = {"oneOf": [{"type": "string", "format": "binary"}]}
+        assert _schema_has_file(schema) is True
+
+    def test_no_file(self):
+        from mcp_restful_adapter.spec_converter import _schema_has_file
+
+        schema = {"type": "object", "properties": {"name": {"type": "string"}}}
+        assert _schema_has_file(schema) is False
+
+
+class TestMultipartForFileBody:
+    """Body params with file types should force multipart/form-data."""
+
+    def test_file_body_forces_multipart(self, minimal_swagger_2):
+        minimal_swagger_2["paths"] = {
+            "/upload": {
+                "post": {
+                    "parameters": [
+                        {
+                            "in": "body",
+                            "name": "file",
+                            "schema": {"type": "array", "items": {"type": "file"}},
+                        }
+                    ],
+                    "consumes": ["application/json"],
+                    "responses": {"200": {"description": "OK"}},
+                }
+            }
+        }
+        result = convert_swagger_to_openapi(minimal_swagger_2)
+        content = result["paths"]["/upload"]["post"]["requestBody"]["content"]
+        assert "multipart/form-data" in content
+        assert "application/json" not in content
+
+
+class TestJavaTypeRef:
+    """Non-standard $ref (Springfox Java types) should be resolved."""
+
+    def test_known_java_type(self):
+        from mcp_restful_adapter.spec_converter import _convert_schema_object
+
+        schema = {"$ref": "Error-ModelName{namespace='java.time', name='LocalDate'}"}
+        result = _convert_schema_object(schema)
+        assert result == {"type": "string", "format": "date"}
+
+    def test_unknown_java_type(self):
+        from mcp_restful_adapter.spec_converter import _convert_schema_object
+
+        schema = {"$ref": "Error-ModelName{namespace='java.time', name='UnknownType'}"}
+        result = _convert_schema_object(schema)
+        assert result == {"type": "string"}
+
+
+class TestInfoEdgeCases:
+    """Edge cases for info object conversion."""
+
+    def test_info_not_dict(self):
+        spec = {
+            "swagger": "2.0",
+            "info": "not a dict",
+            "paths": {},
+        }
+        result = convert_swagger_to_openapi(spec)
+        assert result["info"]["title"] == "API"
+        assert result["info"]["version"] == "1.0.0"
+
+    def test_license_without_name(self, minimal_swagger_2):
+        minimal_swagger_2["info"] = {"title": "Test", "version": "1.0", "license": {}}
+        result = convert_swagger_to_openapi(minimal_swagger_2)
+        assert result["info"]["license"] == {"name": "Unknown"}

@@ -59,6 +59,7 @@ def build_server(
     tags: set[str] | None = None,
     methods: set[str] | None = None,
     paths: str | None = None,
+    exclude_paths: str | None = None,
     extra_headers: dict[str, str] | None = None,
 ) -> FastMCP:
     """Build a FastMCP server from an OpenAPI specification.
@@ -69,7 +70,9 @@ def build_server(
         name: Name for the MCP server.
         tags: Set of tag names to include (OR logic — match ANY).
         methods: Set of HTTP methods to include (case-insensitive).
-        paths: Regex pattern to match against path strings.
+        paths: Regex pattern to match against path strings (whitelist).
+        exclude_paths: Regex pattern to exclude paths (blacklist).
+            Only checked when whitelist does not match (whitelist-first).
         extra_headers: Custom headers to include in every request
             (e.g. ``{"Authorization": "Bearer xxx", "X-Tenant": "acme"}``).
 
@@ -98,7 +101,7 @@ def build_server(
     client = httpx.AsyncClient(**client_kwargs)
 
     # Build RouteMaps for filtering
-    route_maps = _build_route_maps(tags, methods, paths)
+    route_maps = _build_route_maps(tags, methods, paths, exclude_paths)
 
     # Create MCP server from OpenAPI spec
     mcp = FastMCP.from_openapi(
@@ -116,13 +119,15 @@ def _build_route_maps(
     tags: set[str] | None,
     methods: set[str] | None,
     paths: str | None,
+    exclude_paths: str | None = None,
 ) -> list[RouteMap]:
     """Build RouteMap list for filtering endpoints.
 
-    Strategy:
-    - If tags specified: one RouteMap per tag (OR logic), matched first.
-    - If no tags: one RouteMap matching all (filtered by methods/paths).
-    - Final catch-all EXCLUDE rule drops everything unmatched.
+    Strategy (whitelist-first):
+    1. Whitelist match → TOOL (skip blacklist).
+    2. Blacklist match → EXCLUDE.
+    3. No whitelist → default TOOL (blacklist-only mode).
+    4. Catch-all → EXCLUDE.
     """
     route_maps: list[RouteMap] = []
 
@@ -131,31 +136,57 @@ def _build_route_maps(
     if methods:
         allowed_methods = [m.upper() for m in methods]
 
-    # Path pattern
-    pattern = paths or r".*"
-
-    if tags:
-        # OR logic: one RouteMap per tag — first match wins
-        for tag in tags:
+    # 1. Whitelist: highest priority — match → TOOL
+    if paths:
+        if tags:
+            for tag in tags:
+                route_maps.append(
+                    RouteMap(
+                        methods=allowed_methods,
+                        pattern=paths,
+                        tags={tag},
+                        mcp_type=MCPType.TOOL,
+                    )
+                )
+        else:
             route_maps.append(
                 RouteMap(
                     methods=allowed_methods,
-                    pattern=pattern,
-                    tags={tag},
+                    pattern=paths,
                     mcp_type=MCPType.TOOL,
                 )
             )
-    else:
-        # No tag filter: accept all routes matching methods/paths
+
+    # 2. Blacklist: exclude matched paths (only reached if whitelist didn't match)
+    if exclude_paths:
         route_maps.append(
             RouteMap(
                 methods=allowed_methods,
-                pattern=pattern,
-                mcp_type=MCPType.TOOL,
+                pattern=exclude_paths,
+                mcp_type=MCPType.EXCLUDE,
             )
         )
 
-    # Catch-all: exclude everything not matched above
+    # 3. No whitelist: accept everything (blacklist-only mode)
+    if not paths:
+        if tags:
+            for tag in tags:
+                route_maps.append(
+                    RouteMap(
+                        methods=allowed_methods,
+                        tags={tag},
+                        mcp_type=MCPType.TOOL,
+                    )
+                )
+        else:
+            route_maps.append(
+                RouteMap(
+                    methods=allowed_methods,
+                    mcp_type=MCPType.TOOL,
+                )
+            )
+
+    # 4. Catch-all: exclude everything not matched above
     route_maps.append(RouteMap(mcp_type=MCPType.EXCLUDE))
 
     return route_maps

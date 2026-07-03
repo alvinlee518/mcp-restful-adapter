@@ -286,3 +286,105 @@ class TestBuildRouteMaps:
     def test_paths(self):
         maps = _build_route_maps(None, None, r"^/api/")
         assert maps[0].pattern == r"^/api/"
+
+
+# ---------------------------------------------------------------------------
+# Whitelist + Blacklist tests
+# ---------------------------------------------------------------------------
+
+
+class TestWhitelistBlacklist:
+    """Test whitelist-first strategy with API_PATHS + API_PATHS_EXCLUDE."""
+
+    def _get_tool_names(self, server: FastMCP) -> set[str]:
+        async def _list():
+            client = Client(server)
+            async with client:
+                tools = await client.list_tools()
+                return {t.name for t in tools}
+
+        return asyncio.run(_list())
+
+    def test_whitelist_only(self, sample_openapi_spec):
+        """Whitelist matches → included, non-matches → excluded."""
+        server = build_server(sample_openapi_spec, paths=r"/users")
+        tools = self._get_tool_names(server)
+        assert tools == {"listUsers", "createUser"}
+
+    def test_blacklist_only(self, sample_openapi_spec):
+        """No whitelist + blacklist → exclude matched, keep rest."""
+        server = build_server(sample_openapi_spec, exclude_paths=r"/health")
+        tools = self._get_tool_names(server)
+        assert tools == {"listUsers", "createUser", "listProducts"}
+
+    def test_whitelist_priority_over_blacklist(self, sample_openapi_spec):
+        """Path matching both whitelist and blacklist → included (whitelist wins)."""
+        server = build_server(
+            sample_openapi_spec,
+            paths=r"/users",
+            exclude_paths=r"/users",
+        )
+        tools = self._get_tool_names(server)
+        assert tools == {"listUsers", "createUser"}
+
+    def test_whitelist_then_blacklist(self, sample_openapi_spec):
+        """Whitelist misses → blacklist catches → excluded."""
+        server = build_server(
+            sample_openapi_spec,
+            paths=r"/health",
+            exclude_paths=r"health",
+        )
+        tools = self._get_tool_names(server)
+        # whitelist matches /health → TOOL, but blacklist also matches
+        # Since whitelist is checked first and matches, /health is INCLUDED
+        assert tools == {"healthCheck"}
+
+    def test_blacklist_excludes_unmatched_by_whitelist(self, sample_openapi_spec):
+        """Whitelist doesn't match → blacklist excludes the rest."""
+        server = build_server(
+            sample_openapi_spec,
+            paths=r"/health",
+            exclude_paths=r"/users",
+        )
+        tools = self._get_tool_names(server)
+        # /health matches whitelist → TOOL
+        # /users doesn't match whitelist → check blacklist → matches → EXCLUDE
+        # /products doesn't match whitelist → check blacklist → no match → EXCLUDE (catch-all)
+        assert tools == {"healthCheck"}
+
+    def test_blacklist_with_method_filter(self, sample_openapi_spec):
+        """Blacklist + method filter work together."""
+        server = build_server(
+            sample_openapi_spec,
+            methods={"GET"},
+            exclude_paths=r"/health",
+        )
+        tools = self._get_tool_names(server)
+        assert tools == {"listUsers", "listProducts"}
+
+    def test_build_route_maps_whitelist_blacklist(self):
+        """Verify RouteMap ordering for whitelist-first strategy."""
+        from fastmcp.server.providers.openapi.routing import MCPType
+
+        maps = _build_route_maps(
+            None, None, r"/include", r"/exclude"
+        )
+        # Expected: [whitelist TOOL, blacklist EXCLUDE, catch-all EXCLUDE]
+        assert len(maps) == 3
+        assert maps[0].mcp_type == MCPType.TOOL
+        assert maps[0].pattern == r"/include"
+        assert maps[1].mcp_type == MCPType.EXCLUDE
+        assert maps[1].pattern == r"/exclude"
+        assert maps[2].mcp_type == MCPType.EXCLUDE
+
+    def test_build_route_maps_blacklist_only(self):
+        """No whitelist → default TOOL + blacklist EXCLUDE + catch-all."""
+        from fastmcp.server.providers.openapi.routing import MCPType
+
+        maps = _build_route_maps(None, None, None, r"/exclude")
+        # Expected: [blacklist EXCLUDE, default TOOL, catch-all EXCLUDE]
+        assert len(maps) == 3
+        assert maps[0].mcp_type == MCPType.EXCLUDE
+        assert maps[0].pattern == r"/exclude"
+        assert maps[1].mcp_type == MCPType.TOOL
+        assert maps[2].mcp_type == MCPType.EXCLUDE

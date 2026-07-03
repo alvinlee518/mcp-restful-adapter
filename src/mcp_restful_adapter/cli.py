@@ -6,28 +6,30 @@ import asyncio
 import json
 import os
 import sys
+
 from mcp_restful_adapter.logging import setup_logging
 
 
 def main() -> None:
     """Entry point: fetch spec, convert if needed, build and run MCP server."""
 
-    setup_logging()
+    logger = setup_logging()
 
     # 1. Read environment variables
     spec_url = os.environ.get("API_SPEC_URL")
     if not spec_url:
-        print("Error: API_SPEC_URL environment variable is required.", file=sys.stderr)
+        logger.error("API_SPEC_URL environment variable is required.")
         sys.exit(1)
 
     base_url = os.environ.get("API_BASE_URL")
     if not base_url:
-        print("Error: API_BASE_URL environment variable is required.", file=sys.stderr)
+        logger.error("API_BASE_URL environment variable is required.")
         sys.exit(1)
 
     tags_str = os.environ.get("API_TAGS")
     methods_str = os.environ.get("API_METHODS")
     paths_pattern = os.environ.get("API_PATHS")
+    exclude_paths_pattern = os.environ.get("API_PATHS_EXCLUDE")
     headers_str = os.environ.get("API_HEADERS")
 
     # Parse filter values
@@ -44,24 +46,22 @@ def main() -> None:
         try:
             extra_headers = json.loads(headers_str)
             if not isinstance(extra_headers, dict):
-                print("Error: API_HEADERS must be a JSON object.", file=sys.stderr)
+                logger.error("API_HEADERS must be a JSON object.")
                 sys.exit(1)
         except json.JSONDecodeError as e:
-            print(f"Error: API_HEADERS is not valid JSON: {e}", file=sys.stderr)
+            logger.error("API_HEADERS is not valid JSON: %s", e)
             sys.exit(1)
 
     # 2. Fetch the spec
     from mcp_restful_adapter.spec_fetcher import fetch_spec
 
-    print(f"Fetching spec from {spec_url}...", file=sys.stderr)
+    logger.info("Fetching spec from %s...", spec_url)
     try:
         spec = asyncio.run(fetch_spec(spec_url))
     except Exception as e:
-        print(f"Error: Failed to fetch spec: {e}", file=sys.stderr)
+        logger.error("Failed to fetch spec: %s", e)
         sys.exit(1)
-    print(
-        f"Spec loaded: {spec.get('info', {}).get('title', 'Unknown')}", file=sys.stderr
-    )
+    logger.info("Spec loaded: %s", spec.get("info", {}).get("title", "Unknown"))
 
     # 3. Convert Swagger 2.0 → OpenAPI 3.0 if needed
     from mcp_restful_adapter.spec_converter import (
@@ -70,17 +70,19 @@ def main() -> None:
     )
 
     if is_swagger_2(spec):
-        print("Detected Swagger 2.0, converting to OpenAPI 3.0...", file=sys.stderr)
+        logger.info("Detected Swagger 2.0, converting to OpenAPI 3.0...")
         spec = convert_swagger_to_openapi(spec)
 
     # 4. Build and run the MCP server (filtering via RouteMap inside)
     from mcp_restful_adapter.server import build_server
 
     server_name = spec.get("info", {}).get("title", "RESTful API Server")
-    print(
-        f"Filters: tags={tags or 'all'}, methods={methods or 'all'}, "
-        f"paths={paths_pattern or 'all'}",
-        file=sys.stderr,
+    logger.info(
+        "Filters: tags=%s, methods=%s, paths=%s, exclude_paths=%s",
+        tags or "all",
+        methods or "all",
+        paths_pattern or "all",
+        exclude_paths_pattern or "none",
     )
 
     try:
@@ -91,11 +93,12 @@ def main() -> None:
             tags=tags,
             methods=methods,
             paths=paths_pattern,
+            exclude_paths=exclude_paths_pattern,
             extra_headers=extra_headers,
         )
     except Exception as e:
-        print(f"Error: Failed to build MCP server: {e}", file=sys.stderr)
+        logger.error("Failed to build MCP server: %s", e)
         sys.exit(1)
 
-    print(f"Starting MCP server: {server_name}", file=sys.stderr)
+    logger.info("Starting MCP server: %s", server_name)
     mcp.run(transport="stdio", show_banner=False)

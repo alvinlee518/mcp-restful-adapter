@@ -30,15 +30,16 @@ src/mcp_restful_adapter/
 **Pipeline flow**: fetch spec → detect version → convert if Swagger 2.0 → `FastMCP.from_openapi(spec, client, route_maps)` → `server.run(transport="stdio", show_banner=False)`
 
 Key design decisions:
-- **Filtering via fastmcp `RouteMap`** — each tag gets one `MCPType.TOOL` rule (OR logic), final `MCPType.EXCLUDE` drops unmatched routes
+- **Filtering via fastmcp `RouteMap`** — whitelist-first strategy: `API_PATHS` (whitelist TOOL) checked first, `API_PATHS_EXCLUDE` (blacklist EXCLUDE) only evaluated when whitelist misses, final `MCPType.EXCLUDE` drops all unmatched routes
 - **`show_banner=False` is mandatory** — stdio transport uses JSON-RPC; any banner text corrupts the protocol
 - **httpx.AsyncClient** is passed to `from_openapi()` with `X-Requested-From` + `Authorization: Bearer` headers and optional `base_url`
-- **Swagger 2.0 converter** handles: servers, definitions→components, body params→requestBody, inline types→schema, `$ref` rewriting (including Springfox Java types), collectionFormat→style/explode, securityDefinitions, OAuth2 flows, multiple consumes/produces content types
+- **Swagger 2.0 converter** handles: servers, definitions→components, body params→requestBody, inline types→schema, `$ref` rewriting (including Springfox Java types), collectionFormat→style/explode, securityDefinitions, OAuth2 flows, multiple consumes/produces content types, Springfox quirks (`*/*` → `application/json`, `originalRef` stripping, `type: file` in nested schemas, empty `contact`/`license` cleanup)
 - **`API_SPEC_URL` and `API_BASE_URL` are required** env vars; `API_METHODS` defaults to all methods
+- **Logging via `logging` module** — `LOG_LEVEL` controls verbosity; default `WARNING` keeps stderr quiet for MCP stdio transport
 
 ## Dependencies
 
 - `fastmcp` (>=3.4.2) — MCP server framework with `FastMCP.from_openapi()` built-in
 - `httpx` (>=0.28.1) — async HTTP for fetching specs and proxying API calls
 - `pyyaml` (>=6.0) — YAML spec parsing fallback
-- Build backend: `uv_build` (not setuptools)
+- Build backend: `setuptools` (dynamic version from `_version.__version__`)

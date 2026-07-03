@@ -98,9 +98,31 @@ uv run mcp-restful-adapter
 | `API_BASE_URL` | 后端 API 地址 | **必填** |
 | `API_TAGS` | Tag 白名单，逗号分隔，**OR** 逻辑（匹配任一 tag 即保留） | 全部 |
 | `API_METHODS` | HTTP 方法白名单，逗号分隔 | 全部 |
-| `API_PATHS` | 路径正则白名单（如 `^/api/v1/`） | 全部 |
+| `API_PATHS` | 路径正则白名单（`re.search` 匹配） | 全部 |
+| `API_PATHS_EXCLUDE` | 路径正则黑名单（白名单优先，见下方说明） | 无 |
 | `API_HEADERS` | 自定义请求头（JSON 格式，含认证等） | 空 |
-| `LOG_LEVEL` | 日志级别（`INFO` 记录请求 URL，`DEBUG` 记录请求头和 body） | `WARNING` |
+| `LOG_LEVEL` | 日志级别（`INFO` 显示启动信息，`DEBUG` 记录请求头和 body） | `WARNING` |
+
+### 白名单 / 黑名单策略
+
+`API_PATHS`（白名单）和 `API_PATHS_EXCLUDE`（黑名单）配合使用，**白名单优先**：
+
+```
+白名单命中 → 放行（不再检查黑名单）
+白名单未命中 + 黑名单命中 → 排除
+白名单未命中 + 黑名单未命中 → 排除
+仅配置黑名单（无白名单） → 未命中黑名单的放行
+```
+
+推荐配置 — 只暴露只读查询接口：
+
+```json
+{
+  "API_METHODS": "GET",
+  "API_PATHS": "(?i)(get|query|detail|page|select|list|search|info|find|fetch|tree|export|download|template|count|stat|check|\\{[a-zA-Z]+\\})",
+  "API_PATHS_EXCLUDE": "(?i)(save|update|delete|remove|create|add|clear|sync|generate|import|handle|flush|send|complete|fix|reset|process|submit|approve|cancel|enable|disable|trigger|notify|push|pull|upload|revoke|grant|bind|unbind|transfer|lock|unlock|batch)"
+}
+```
 
 ### 过滤示例
 
@@ -114,9 +136,17 @@ API_TAGS=pet,store
 # 只要 /api/v1/ 开头的路径
 API_PATHS=^/api/v1/
 
+# 排除包含 delete/remove 的路径（黑名单）
+API_PATHS_EXCLUDE=(?i)(delete|remove)
+
 # 组合使用：pet tag 下的 GET 和 POST
 API_TAGS=pet
 API_METHODS=GET,POST
+
+# 只读查询（白名单 + 黑名单 + GET）
+API_METHODS=GET
+API_PATHS=(?i)(get|query|detail|page|list|search)
+API_PATHS_EXCLUDE=(?i)(save|update|delete|remove|create)
 ```
 
 ## 开发

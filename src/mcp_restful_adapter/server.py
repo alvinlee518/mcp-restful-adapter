@@ -17,6 +17,19 @@ from mcp_restful_adapter.logging import LOGGER_NAME
 logger = logging.getLogger(LOGGER_NAME)
 
 
+# mcp >= 1.23.0 enables DNS rebinding protection by default (CVE-2025-66416),
+# returning 421 for requests behind reverse proxies. Force-disable it since
+# nginx already handles host/origin validation.
+try:
+    from mcp.server.transport_security import TransportSecuritySettings
+
+    TransportSecuritySettings.model_fields[
+        "enable_dns_rebinding_protection"
+    ].default = False
+except (ImportError, KeyError):
+    pass
+
+
 async def inject_auth(request: httpx.Request):
     """Forward the MCP client's Authorization header to the backend API.
 

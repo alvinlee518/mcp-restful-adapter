@@ -10,6 +10,7 @@ COPY pyproject.toml README.md ./
 COPY src/ src/
 
 # Install dependencies (no dev deps)
+ENV UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 RUN uv sync --no-dev
 
 # Install curl for healthcheck

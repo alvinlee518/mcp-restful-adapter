@@ -1,0 +1,38 @@
+# MCP RESTful Adapter - Docker Compose
+#
+# Usage:
+#   docker compose up -d
+#
+# Each service exposes:
+#   http://localhost:<port>/mcp
+#   http://localhost:<port>/health
+
+services:
+
+  # ── Service A ──────────────────────────────────────────────────
+  service-a:
+    build: .
+    ports:
+      - "8001:8000"
+    environment:
+      API_SPEC_URL: ${SERVICE_A_SPEC_URL}
+      API_BASE_URL: ${SERVICE_A_BASE_URL}
+      API_METHODS: ${SERVICE_A_METHODS:-GET,POST}
+      API_PATHS_EXCLUDE: ${SERVICE_A_EXCLUDE:-}
+      API_MAX_RESPONSE_SIZE: "500000"
+      LOG_LEVEL: INFO
+    restart: unless-stopped
+
+  # ── Service B ──────────────────────────────────────────────────
+  service-b:
+    build: .
+    ports:
+      - "8002:8000"
+    environment:
+      API_SPEC_URL: ${SERVICE_B_SPEC_URL}
+      API_BASE_URL: ${SERVICE_B_BASE_URL}
+      API_METHODS: ${SERVICE_B_METHODS:-GET,POST}
+      API_PATHS_EXCLUDE: ${SERVICE_B_EXCLUDE:-}
+      API_MAX_RESPONSE_SIZE: "500000"
+      LOG_LEVEL: INFO
+    restart: unless-stopped

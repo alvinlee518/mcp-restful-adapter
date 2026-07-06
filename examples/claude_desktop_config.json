@@ -23,7 +23,7 @@
       "env": {
         "API_SPEC_URL": "https://your-api.example.com/openapi.json",
         "API_BASE_URL": "https://your-api.example.com",
-        "API_TOKEN": "your-bearer-token",
+        "API_HEADERS": "{\"Authorization\": \"Bearer your-bearer-token\"}",
         "API_PATHS": "^/api/v[12]/"
       }
     }

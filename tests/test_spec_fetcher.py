@@ -6,7 +6,6 @@ import json
 
 import httpx
 import pytest
-import pytest_asyncio
 
 from mcp_restful_adapter.spec_fetcher import fetch_spec
 

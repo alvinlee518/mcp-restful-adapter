@@ -128,4 +128,5 @@ def main() -> None:
             port=port,
             show_banner=False,
             middleware=middleware,
+            host_origin_protection=False,
         )

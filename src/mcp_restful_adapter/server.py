@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 import httpx
 from fastmcp import FastMCP
 from fastmcp.server.providers.openapi.routing import MCPType, RouteMap
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from mcp_restful_adapter._version import __version__ as _version
 from mcp_restful_adapter.logging import LOGGER_NAME
@@ -130,6 +133,16 @@ def build_server(
         route_maps=route_maps,
         validate_output=False,
     )
+
+    # Health check endpoint (only useful for HTTP transports)
+    @mcp.custom_route("/health", methods=["GET"])
+    async def health_check(request: Request) -> JSONResponse:
+        return JSONResponse(
+            {
+                "status": "ok",
+                "version": _version,
+            }
+        )
 
     return mcp
 

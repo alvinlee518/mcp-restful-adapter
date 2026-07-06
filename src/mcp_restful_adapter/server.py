@@ -15,6 +15,25 @@ from mcp_restful_adapter.logging import LOGGER_NAME
 logger = logging.getLogger(LOGGER_NAME)
 
 
+async def inject_auth(request: httpx.Request):
+    """Forward the MCP client's Authorization header to the backend API.
+
+    fastmcp strips the Authorization header from incoming MCP requests by
+    default. This hook reads it from the current HTTP context and injects
+    it into the outgoing httpx request. Only active for HTTP transports.
+    """
+    from fastmcp.server.context import _current_transport
+    from fastmcp.server.dependencies import get_http_request
+
+    if _current_transport.get() == "stdio":
+        return
+
+    mcp_request = get_http_request()
+    auth = mcp_request.headers.get("authorization")
+    if auth and "authorization" not in request.headers:
+        request.headers["authorization"] = auth
+
+
 async def log_request(request: httpx.Request):
     """Log outgoing HTTP request details."""
     body = (
@@ -91,7 +110,7 @@ def build_server(
         "timeout": 30.0,
         "follow_redirects": True,
         "event_hooks": {
-            "request": [log_request],
+            "request": [inject_auth, log_request],
             "response": [log_response],
         },
     }

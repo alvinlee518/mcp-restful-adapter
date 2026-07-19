@@ -8,6 +8,13 @@ from typing import Any
 import httpx
 
 
+def _parse_json_object(text: str) -> dict[str, Any]:
+    result = json.loads(text)
+    if not isinstance(result, dict):
+        raise ValueError("API specification root must be an object")
+    return result
+
+
 async def fetch_spec(url: str) -> dict[str, Any]:
     """Fetch an API specification from a URL and parse it as JSON or YAML.
 
@@ -31,7 +38,7 @@ async def fetch_spec(url: str) -> dict[str, Any]:
     # Try JSON first
     if "json" in content_type or url.endswith(".json"):
         try:
-            return json.loads(text)
+            return _parse_json_object(text)
         except json.JSONDecodeError:
             pass
 
@@ -47,7 +54,7 @@ async def fetch_spec(url: str) -> dict[str, Any]:
 
     # Last resort: try JSON again (some servers return JSON with wrong content-type)
     try:
-        return json.loads(text)
+        return _parse_json_object(text)
     except json.JSONDecodeError:
         raise ValueError(
             f"Failed to parse spec from {url} as JSON or YAML. "

@@ -84,6 +84,28 @@ class TestFetchSpecJSON:
         finally:
             httpx.AsyncClient.__init__ = original_init
 
+    @pytest.mark.asyncio
+    async def test_fetch_json_array_rejected(self):
+        transport = httpx.MockTransport(
+            lambda req: httpx.Response(
+                200,
+                json=[{"openapi": "3.0.3"}],
+                headers={"content-type": "application/json"},
+            )
+        )
+        original_init = httpx.AsyncClient.__init__
+
+        def patched_init(self, *args, **kwargs):
+            kwargs["transport"] = transport
+            original_init(self, *args, **kwargs)
+
+        httpx.AsyncClient.__init__ = patched_init
+        try:
+            with pytest.raises(ValueError, match="root must be an object"):
+                await fetch_spec("https://example.com/openapi.json")
+        finally:
+            httpx.AsyncClient.__init__ = original_init
+
 
 # ---------------------------------------------------------------------------
 # YAML parsing

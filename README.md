@@ -72,7 +72,20 @@ API_TAGS=pet \
 uv run mcp-restful-adapter
 ```
 
-### 3. 带认证的 API
+### 3. Xquik OpenAPI 示例
+
+Xquik 的公开 OpenAPI 规格可以直接作为远程 spec 读取。执行需要认证的端点时，再通过 `API_HEADERS` 提供自己的 API key。
+
+Xquik is an independent third-party service. Not affiliated with X Corp. "Twitter" and "X" are trademarks of X Corp.
+
+```bash
+API_SPEC_URL=https://xquik.com/openapi.json \
+API_BASE_URL=https://xquik.com \
+API_HEADERS='{"x-api-key":"your-api-key"}' \
+uvx mcp-restful-adapter
+```
+
+### 4. 带认证的 API
 
 ```json
 {
